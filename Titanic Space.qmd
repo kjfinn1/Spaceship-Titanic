@@ -1,0 +1,264 @@
+---
+title: "Titanic Space"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(naniar)
+library(ggplot2)
+library(UpSetR)
+library(randomForest)
+library(e1071) 
+library(xgboost)
+```
+
+You can add options to executable code like this
+
+```{r}
+train <- read_csv("~/Downloads/spaceship-titanic/train.csv")
+test <- read_csv("~/Downloads/spaceship-titanic/test.csv")
+train <- train %>%
+    separate(Cabin, into = c("Deck", "Num", "Side"), sep = "/")
+train$Num <- as.numeric(train$Num)
+test <- test %>%
+    separate(Cabin, into = c("Deck", "Num", "Side"), sep = "/")
+test$Num <- as.numeric(test$Num)
+test$RoomService[is.na(test$RoomService)] <- 0
+test$FoodCourt[is.na(test$FoodCourt)] <- 0
+test$ShoppingMall[is.na(test$ShoppingMall)] <- 0
+test$Spa[is.na(test$Spa)] <- 0
+test$VRDeck[is.na(test$VRDeck)] <- 0
+test$VIP[is.na(test$VIP)] <- FALSE
+test$HomePlanet[is.na(test$HomePlanet)] <- "Earth"
+test$Age[is.na(test$Age)] <- mean(test$Age, na.rm = TRUE)
+test$Num[is.na(test$Num)] <- mean(test$Num, na.rm = TRUE)
+test$Destination[is.na(test$Destination)] <- "TRAPPIST-1e"
+test$CryoSleep[is.na(test$CryoSleep)] <- FALSE
+test <- test %>%
+    mutate(Spending = RoomService + FoodCourt + ShoppingMall + Spa + VRDeck)
+test <- test %>%
+    select(-RoomService, -FoodCourt, -ShoppingMall, -Spa, -VRDeck)
+test <- test %>% mutate(DeckB_or_C = Deck == "B" | Deck == "C")
+
+
+train$RoomService[is.na(train$RoomService)] <- 0
+train$FoodCourt[is.na(train$FoodCourt)] <- 0
+train$ShoppingMall[is.na(train$ShoppingMall)] <- 0
+train$Spa[is.na(train$Spa)] <- 0
+train$VRDeck[is.na(train$VRDeck)] <- 0
+train$Age[is.na(train$Age)] <- mean(train$Age, na.rm = TRUE)
+train$VIP[is.na(train$VIP)] <- FALSE
+train$HomePlanet[is.na(train$HomePlanet)] <- "Earth"
+train$Destination[is.na(train$Destination)] <- "TRAPPIST-1e"
+train$CryoSleep[is.na(train$CryoSleep)] <- FALSE
+train <- train %>%
+    mutate(Spending = RoomService + FoodCourt + ShoppingMall + Spa + VRDeck)
+train <- train %>%
+    select(-RoomService, -FoodCourt, -ShoppingMall, -Spa, -VRDeck)
+train <- na.omit(train)
+train <- train %>% mutate(DeckB_or_C = Deck == "B" | Deck == "C")
+```
+
+
+```{r}
+boxplot(Num~Transported, data = train)
+boxplot(Age~Transported, data = train)
+boxplot(Spending~Transported, data = train)
+```
+
+```{r}
+standardize <- function(x) {
+  return ((x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE))
+}
+
+cols_to_standardize <- c(5, 8)
+
+train[cols_to_standardize] <- lapply(train[cols_to_standardize], standardize)
+```
+
+```{r}
+log_features <- function(x) {
+  return (log(x+0.0001))
+}
+
+cols_to_log <- c(12)
+
+train[cols_to_log] <- lapply(train[cols_to_log], log_features)
+```
+
+```{r}
+table(test$Deck)
+table(test$Side)
+```
+
+```{r}
+Num_aov <- aov(Transported ~ Num, data = train)
+summary(Num_aov)
+Age_aov <- aov(Transported ~ Age, data = train)
+summary(Age_aov)
+Spending_aov <- aov(Transported ~ Spending, data = train)
+summary(Spending_aov)
+```
+
+```{r}
+chisq_test <- chisq.test(table(train$Transported, train$HomePlanet))
+print(chisq_test)
+chisq_test <- chisq.test(table(train$Transported, train$CryoSleep))
+print(chisq_test)
+chisq_test <- chisq.test(table(train$Transported, train$Deck))
+print(chisq_test)
+chisq_test <- chisq.test(table(train$Transported, train$Side))
+print(chisq_test)
+chisq_test <- chisq.test(table(train$Transported, train$Destination))
+print(chisq_test)
+chisq_test <- chisq.test(table(train$Transported, train$VIP))
+print(chisq_test)
+```
+
+```{r}
+library(caret)
+
+train_indices <- createDataPartition(train$Transported, p = 0.7, list = FALSE)
+train_sample <- train[train_indices, ]
+test_sample <- train[-train_indices, ]
+```
+
+```{r}
+linear_model <- lm(Transported ~ HomePlanet + CryoSleep + DeckB_or_C + Num + Side + Destination + Age + Spending, data = train_sample)
+summary(linear_model)
+```
+
+```{r}
+predicted_values <- predict(linear_model, newdata = test_sample)
+
+predicted_labels <- ifelse(predicted_values > 0.5, 1, 0)
+
+actual_labels <- test_sample$Transported
+
+correct_predictions <- sum(predicted_labels == actual_labels)
+
+confusion_matrix <- table(Predicted = predicted_labels, Actual = actual_labels)
+
+print(confusion_matrix)
+```
+
+```{r}
+train_sample$Transported <- as.factor(train_sample$Transported)
+test_sample$Transported <- as.factor(test_sample$Transported)
+
+rf <- randomForest(Transported ~ HomePlanet + CryoSleep + DeckB_or_C + Num + Side + Destination + Age + Spending, 
+             data = train_sample,
+             importance = TRUE,
+             proximity = TRUE)
+```
+
+```{r}
+predicted_values <- predict(rf, newdata = test_sample)
+
+predicted_values <- as.factor(predicted_values)
+
+actual_labels <- test_sample$Transported
+
+confusion_matrix <- table(Predicted = predicted_values, Actual = actual_labels)
+
+print(confusion_matrix)
+```
+
+```{r}
+SVC = svm(formula = Transported ~ HomePlanet + CryoSleep + DeckB_or_C + Num + Side + Destination + Age + Spending,
+                 data = train_sample,
+                 type = 'C-classification',
+                 kernel = 'radial')
+```
+
+```{r}
+predicted_values <- predict(SVC, newdata = test_sample)
+
+predicted_values <- as.factor(predicted_values)
+
+actual_labels <- test_sample$Transported
+
+confusion_matrix <- table(Predicted = predicted_values, Actual = actual_labels)
+
+print(confusion_matrix)
+```
+
+```{r}
+train_sample$HomePlanet <- as.factor(train_sample$HomePlanet)
+train_sample$CryoSleep <- as.factor(train_sample$CryoSleep)
+train_sample$Destination <- as.factor(train_sample$Destination)
+train_sample$Side <- as.factor(train_sample$Side)
+
+test_sample$HomePlanet <- as.factor(test_sample$HomePlanet)
+test_sample$CryoSleep <- as.factor(test_sample$CryoSleep)
+test_sample$Destination <- as.factor(test_sample$Destination)
+test_sample$Side <- as.factor(test_sample$Side)
+
+X_train <- model.matrix(Transported ~ HomePlanet + CryoSleep + DeckB_or_C + Num + Side + Destination + Age + Spending - 1, data = train_sample)
+X_test <- model.matrix(Transported ~ HomePlanet + CryoSleep + DeckB_or_C + Num + Side + Destination + Age + Spending - 1, data = test_sample)
+
+y_train <- as.integer(train_sample$Transported) - 1
+y_test <- as.integer(test_sample$Transported) - 1
+
+xgb_train <- xgb.DMatrix(data = X_train, label = y_train)
+xgb_test <- xgb.DMatrix(data = X_test, label = y_test)
+```
+
+```{r}
+xgb_train <- xgb.DMatrix(data = as.matrix(X_train), label = y_train)
+xgb_test <- xgb.DMatrix(data = as.matrix(X_test), label = y_test)
+xgb_params <- list(
+  booster = "gbtree",
+  eta = 0.3,
+  max_depth = 6,
+  gamma = 1,
+  objective = "binary:logistic",
+  num_class = 2
+)
+```
+
+```{r}
+bst <- xgboost(data = xgb_train, max.depth = 9, eta = 0.4, nrounds = 300, objective = "binary:logistic")
+```
+
+```{r}
+test_sample$Transported <- as.factor(test_sample$Transported)
+
+predicted_probabilities <- predict(bst, newdata = xgb_test)
+
+predicted_labels <- ifelse(predicted_probabilities > 0.5, 1, 0)
+
+actual_labels <- as.integer(test_sample$Transported) - 1
+
+confusion_matrix <- table(Predicted = predicted_labels, Actual = actual_labels)
+
+print(confusion_matrix)
+```
+
+```{r}
+predicted_probabilities <- predict(linear_model, newdata = test)
+
+predicted_labels <- ifelse(predicted_probabilities > 0.5, 1, 0)
+
+predicted_labels <- ifelse(predicted_labels == FALSE, "False", "True")
+
+prediction_results <- data.frame(
+    PassengerId = test$PassengerId,
+    Transported = predicted_labels)
+
+write.csv(prediction_results, "predictions.csv", row.names = FALSE)
+```
+
